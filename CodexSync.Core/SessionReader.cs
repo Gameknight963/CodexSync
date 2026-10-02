@@ -69,7 +69,8 @@ public static class SessionReader
     public static async Task<SessionMetadata> ReadMetadataAsync(
         string path, CancellationToken cancellationToken = default)
     {
-        using StreamReader? reader = File.OpenText(path);
+        using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using StreamReader reader = new(stream);
         return await ReadMetadataAsync(reader, cancellationToken);
     }
 }
