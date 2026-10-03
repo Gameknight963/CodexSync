@@ -5,19 +5,19 @@ try
     List<string> arguments = new(args);
     string? mappingOverride = TakeOption(arguments, "--mapping-file");
     string? sessionsOverride = TakeOption(arguments, "--sessions-dir");
+    bool fullPaths = arguments.Remove("--full-paths");
     if (arguments.Count == 0 || arguments[0] is "--help" or "-h" or "help")
     {
         Console.WriteLine("""
             Usage:
-              codexsync list
+              codexsync list [--full-paths]
               codexsync map <session-id> <local-folder>
               codexsync mapping-path
 
             Options:
               --mapping-file <path>  Override the machine-local mapping file.
               --sessions-dir <path>  Override the directory scanned by list.
-
-            list reads session metadata only; it does not modify Codex files.
+              --full-paths          Show complete paths in list instead of shortening them.
             """);
         return 0;
     }
@@ -26,6 +26,8 @@ try
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "CodexSync", "mappings.json"));
     SessionMappingStore store = new(mappingPath);
+    if (fullPaths && arguments[0] != "list")
+        throw new ArgumentException("--full-paths is only supported by list.");
 
     switch (arguments[0])
     {
@@ -65,8 +67,8 @@ try
                     continue;
                 }
                 string? localFolder = await store.GetAsync(metadata.Id);
-                rows.Add((metadata.Id.ToString("D"), Display(metadata.WorkingDirectory),
-                    localFolder is null ? null : Display(localFolder)));
+                rows.Add((metadata.Id.ToString("D"), FormatPath(metadata.WorkingDirectory, fullPaths),
+                    localFolder is null ? null : FormatPath(localFolder, fullPaths)));
             }
             int idWidth = Math.Max("Session ID".Length, rows.Select(row => row.Id.Length).DefaultIfEmpty(0).Max());
             int savedWidth = Math.Max("Saved folder".Length, rows.Select(row => row.SavedFolder.Length).DefaultIfEmpty(0).Max());
@@ -103,6 +105,17 @@ static string? TakeOption(List<string> arguments, string name)
 }
 
 static string Display(string value) => value.Replace("\t", "\\t").Replace("\r", "\\r").Replace("\n", "\\n");
+
+static string FormatPath(string path, bool fullPaths)
+{
+    string value = Display(path);
+    const int maximumWidth = 60;
+    if (fullPaths || value.Length <= maximumWidth) return value;
+    // Preserve the path's beginning and give more space to its distinguishing ending.
+    const int prefixLength = 20;
+    const int suffixLength = maximumWidth - prefixLength - 3;
+    return value[..prefixLength] + "..." + value[^suffixLength..];
+}
 
 static void WriteColored(string value, ConsoleColor color)
 {
