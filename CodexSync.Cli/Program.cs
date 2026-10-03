@@ -18,11 +18,12 @@ try
               codexsync map <session-id> <local-folder>
               codexsync mapping-path
               codexsync import <session-file>
+              codexsync export <session-id> <archive-folder>
 
             Options:
               --mapping-file <path>  Override the machine-local mapping file.
-              --sessions-dir <path>  Override the directory scanned by list.
-              --codex-home <path>    Override the Codex home for list or import.
+              --sessions-dir <path>  Override the directory scanned by list or export.
+              --codex-home <path>    Override the Codex home for list, import, or export.
               --full-paths           Show complete paths in list instead of shortening them.
             """);
         return 0;
@@ -37,9 +38,16 @@ try
 
     switch (arguments[0])
     {
+        case "export" when arguments.Count == 3:
+            if (!Guid.TryParse(arguments[1], out Guid exportId) || exportId == Guid.Empty)
+                throw new ArgumentException("The session ID must be a non-empty UUID.");
+            string exportedPath = await SessionExporter.ExportAsync(exportId,
+                sessionsOverride ?? Path.Combine(codexHome, "sessions"), arguments[2]);
+            Console.WriteLine($"Exported: {exportedPath}");
+            return 0;
         case "import" when arguments.Count == 2:
             if (sessionsOverride is not null)
-                throw new ArgumentException("Use --codex-home for import; --sessions-dir only applies to list.");
+                throw new ArgumentException("Use --codex-home for import; --sessions-dir only applies to list or export.");
             SessionMetadata importedMetadata = await SessionReader.ReadMetadataAsync(arguments[1]);
             string importedPath = await SessionImporter.ImportAsync(arguments[1],
                 Path.Combine(codexHome, "sessions"), store);
