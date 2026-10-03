@@ -48,7 +48,7 @@ try
             if (!Directory.Exists(sessionsPath))
                 throw new DirectoryNotFoundException($"The sessions directory does not exist: {sessionsPath}");
 
-            Console.WriteLine("Session ID\tSaved folder\tLocal folder");
+            List<(string Id, string SavedFolder, string? LocalFolder)> rows = new();
             int failures = 0;
             foreach (string file in Directory.EnumerateFiles(sessionsPath, "*.jsonl", SearchOption.AllDirectories)
                 .OrderBy(path => path, StringComparer.Ordinal))
@@ -65,7 +65,19 @@ try
                     continue;
                 }
                 string? localFolder = await store.GetAsync(metadata.Id);
-                Console.WriteLine($"{metadata.Id:D}\t{Display(metadata.WorkingDirectory)}\t{Display(localFolder ?? "(unmapped)")}");
+                rows.Add((metadata.Id.ToString("D"), Display(metadata.WorkingDirectory),
+                    localFolder is null ? null : Display(localFolder)));
+            }
+            int idWidth = Math.Max("Session ID".Length, rows.Select(row => row.Id.Length).DefaultIfEmpty(0).Max());
+            int savedWidth = Math.Max("Saved folder".Length, rows.Select(row => row.SavedFolder.Length).DefaultIfEmpty(0).Max());
+            Console.WriteLine($"{"Session ID".PadRight(idWidth)}  {"Saved folder".PadRight(savedWidth)}  Local folder");
+            foreach ((string idText, string savedFolder, string? localFolder) in rows)
+            {
+                Console.Write(idText.PadRight(idWidth) + "  ");
+                WriteColored(savedFolder.PadRight(savedWidth), ConsoleColor.DarkGray);
+                Console.Write("  ");
+                WriteColored(localFolder ?? "(unmapped)", localFolder is null ? ConsoleColor.Yellow : ConsoleColor.Green);
+                Console.WriteLine();
             }
             return failures == 0 ? 0 : 1;
         default:
@@ -91,3 +103,23 @@ static string? TakeOption(List<string> arguments, string name)
 }
 
 static string Display(string value) => value.Replace("\t", "\\t").Replace("\r", "\\r").Replace("\n", "\\n");
+
+static void WriteColored(string value, ConsoleColor color)
+{
+    if (Console.IsOutputRedirected || Environment.GetEnvironmentVariable("NO_COLOR") is { Length: > 0 })
+    {
+        Console.Write(value);
+        return;
+    }
+
+    ConsoleColor previousColor = Console.ForegroundColor;
+    try
+    {
+        Console.ForegroundColor = color;
+        Console.Write(value);
+    }
+    finally
+    {
+        Console.ForegroundColor = previousColor;
+    }
+}
