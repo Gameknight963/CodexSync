@@ -17,7 +17,7 @@ try
             Options:
               --mapping-file <path>  Override the machine-local mapping file.
               --sessions-dir <path>  Override the directory scanned by list.
-              --full-paths          Show complete paths in list instead of shortening them.
+              --full-paths           Show complete paths in list instead of shortening them.
             """);
         return 0;
     }
