@@ -29,7 +29,29 @@ internal static class CodexRegistration
                 ["clientInfo"] = new JObject { ["name"] = "codexsync", ["version"] = "0.1.0" }
             }, timeout.Token);
             await process.StandardInput.WriteLineAsync("{\"method\":\"initialized\"}");
-            JObject result = await RequestAsync(process, 2, "thread/resume", new JObject
+            JObject read = await RequestAsync(process, 2, "thread/read", new JObject
+            {
+                ["threadId"] = id.ToString("D"), ["includeTurns"] = false
+            }, timeout.Token);
+            if (read["thread"]?["cwd"]?.Value<string>() == folder)
+            {
+                string? cursor = null;
+                int requestId = 3;
+                do
+                {
+                    JObject listing = await RequestAsync(process, requestId++, "thread/list", new JObject
+                    {
+                        ["cwd"] = folder, ["limit"] = 100, ["cursor"] = cursor,
+                        ["useStateDbOnly"] = false,
+                        ["sourceKinds"] = new JArray("cli", "vscode", "exec", "appServer", "unknown",
+                            "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther")
+                    }, timeout.Token);
+                    if (listing["data"] is JArray data && data.Any(thread => thread["id"]?.Value<string>() == id.ToString("D")))
+                        return;
+                    cursor = listing.Value<string>("nextCursor");
+                } while (cursor is not null);
+            }
+            JObject result = await RequestAsync(process, 1000000, "thread/resume", new JObject
             {
                 ["threadId"] = id.ToString("D"), ["cwd"] = folder
             }, timeout.Token);

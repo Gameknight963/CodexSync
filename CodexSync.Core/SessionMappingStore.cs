@@ -21,6 +21,13 @@ public sealed class SessionMappingStore
         return document["sessions"]![sessionId.ToString("D")]?.Value<string>();
     }
 
+    public async Task<IReadOnlyDictionary<Guid, string>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        JObject document = await LoadAsync(cancellationToken);
+        return ((JObject)document["sessions"]!).Properties().ToDictionary(
+            property => Guid.Parse(property.Name), property => property.Value.Value<string>()!);
+    }
+
     public async Task SetAsync(Guid sessionId, string localFolder, CancellationToken cancellationToken = default)
     {
         ValidateId(sessionId);

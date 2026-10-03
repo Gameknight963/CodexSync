@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../CodexSync.Core/CodexSync.Core.csproj" />
+    <InternalsVisibleTo Include="CodexSync.Tests" />
   </ItemGroup>
 </Project>

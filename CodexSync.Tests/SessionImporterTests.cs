@@ -49,7 +49,7 @@ public sealed class SessionImporterTests : IDisposable
         Assert.Equal("/foreign/project", records[3]["payload"]!["text"]!.Value<string>());
         Assert.Equal("/foreign/project", records[3]["payload"]!["cwd"]!.Value<string>());
         Assert.Equal(JTokenType.String, records[4]["timestamp"]!.Type);
-        await Assert.ThrowsAsync<IOException>(() => SessionImporter.ImportAsync(source, sessions, store));
+        Assert.Equal(imported, await SessionImporter.ImportAsync(source, sessions, store));
         Assert.Single(Directory.GetFiles(sessions, "*.jsonl", SearchOption.AllDirectories));
     }
 

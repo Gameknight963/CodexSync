@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodexSync.Core\CodexSync.Core.csproj" />
+    <ProjectReference Include="..\CodexSync.Cli\CodexSync.Cli.csproj" />
   </ItemGroup>
 
   <ItemGroup>

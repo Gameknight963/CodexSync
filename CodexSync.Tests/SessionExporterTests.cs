@@ -33,7 +33,7 @@ public sealed class SessionExporterTests : IDisposable
         await mappings.SetAsync(id, root);
         string imported = await SessionImporter.ImportAsync(exported, Path.Combine(root, "other-machine"), mappings);
         Assert.Equal(root, (await SessionReader.ReadMetadataAsync(imported)).WorkingDirectory);
-        await Assert.ThrowsAsync<IOException>(() => SessionExporter.ExportAsync(id, sessions, archive));
+        Assert.Equal(exported, await SessionExporter.ExportAsync(id, sessions, archive));
         Assert.Equal(original, await File.ReadAllBytesAsync(exported));
     }
 

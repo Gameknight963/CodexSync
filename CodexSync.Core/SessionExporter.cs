@@ -13,6 +13,10 @@ public static class SessionExporter
         if (relativeArchive == "." || (!Path.IsPathRooted(relativeArchive) &&
             relativeArchive != ".." && !relativeArchive.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)))
             throw new ArgumentException("The archive must be outside the live sessions directory.", nameof(archiveDirectory));
+        string relativeSessions = Path.GetRelativePath(archiveRoot, sessionsRoot);
+        if (!Path.IsPathRooted(relativeSessions) && relativeSessions != ".." &&
+            !relativeSessions.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            throw new ArgumentException("The archive cannot contain the live sessions directory.", nameof(archiveDirectory));
         if (!Directory.Exists(sessionsRoot))
             throw new DirectoryNotFoundException($"The sessions directory does not exist: {sessionsRoot}");
 
@@ -30,8 +34,6 @@ public static class SessionExporter
 
         string destinationDirectory = Path.Combine(archiveRoot, "sessions");
         string destination = Path.Combine(destinationDirectory, $"{sessionId:D}.jsonl");
-        if (File.Exists(destination))
-            throw new IOException($"An export already exists at {destination}. Export will not overwrite it.");
         Directory.CreateDirectory(destinationDirectory);
         string temporary = Path.Combine(destinationDirectory, $".{Guid.NewGuid():N}.tmp");
         try
@@ -59,7 +61,24 @@ public static class SessionExporter
                 await foreach (Newtonsoft.Json.Linq.JObject record in SessionReader.ReadRecordsAsync(reader, cancellationToken)) { }
             }
             cancellationToken.ThrowIfCancellationRequested();
-            File.Move(temporary, destination, overwrite: false);
+            if (File.Exists(destination))
+            {
+                string fingerprint = await SessionHistory.FingerprintAsync(destination, cancellationToken);
+                HistoryRelationship relationship = await SessionHistory.CompareAsync(destination, temporary, cancellationToken);
+                if (relationship is HistoryRelationship.Equal or HistoryRelationship.ExistingExtendsIncoming)
+                    return destination;
+                if (relationship == HistoryRelationship.Diverged)
+                {
+                    string conflict = await SessionHistory.PreserveConflictAsync(sessionId, destination, temporary,
+                        Path.Combine(archiveRoot, "conflicts"), cancellationToken);
+                    throw new IOException($"Session {sessionId:D} diverged. Both versions were preserved in {conflict}.");
+                }
+                await SessionHistory.RetainSharedPrefixAsync(destination, temporary, cancellationToken);
+                if (fingerprint != await SessionHistory.FingerprintAsync(destination, cancellationToken))
+                    throw new IOException("The archive changed during export. Retry.");
+                File.Move(temporary, destination, overwrite: true);
+            }
+            else File.Move(temporary, destination, overwrite: false);
             return destination;
         }
         finally

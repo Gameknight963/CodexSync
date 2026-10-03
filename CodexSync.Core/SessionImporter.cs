@@ -6,9 +6,9 @@ namespace CodexSync.Core;
 
 public static class SessionImporter
 {
-    // Import only new sessions. Updating an existing history requires conflict handling.
     public static async Task<string> ImportAsync(string sourcePath, string sessionsDirectory,
-        SessionMappingStore mappings, CancellationToken cancellationToken = default)
+        SessionMappingStore mappings, CancellationToken cancellationToken = default,
+        string? conflictDirectory = null)
     {
         SessionMetadata metadata = await SessionReader.ReadMetadataAsync(sourcePath, cancellationToken);
         string localFolder = await mappings.GetAsync(metadata.Id, cancellationToken) ??
@@ -17,13 +17,17 @@ public static class SessionImporter
             throw new DirectoryNotFoundException($"The mapped folder does not exist: {localFolder}");
 
         string root = Path.GetFullPath(sessionsDirectory);
+        string? existingPath = null;
         if (Directory.Exists(root))
         {
             foreach (string existing in Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories))
             {
                 SessionMetadata other = await SessionReader.ReadMetadataAsync(existing, cancellationToken);
                 if (other.Id == metadata.Id)
-                    throw new IOException($"Session {metadata.Id:D} already exists at {existing}. Import will not overwrite it.");
+                {
+                    if (existingPath is not null) throw new IOException($"Multiple local files have session ID {metadata.Id:D}.");
+                    existingPath = existing;
+                }
             }
         }
 
@@ -72,6 +76,26 @@ public static class SessionImporter
             await writer.DisposeAsync();
             writer = null;
             cancellationToken.ThrowIfCancellationRequested();
+            if (existingPath is not null)
+            {
+                // Hold a handle denying writers on Windows while comparing and replacing.
+                using FileStream guard = new(existingPath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+                string fingerprint = await SessionHistory.FingerprintAsync(existingPath, cancellationToken);
+                HistoryRelationship relationship = await SessionHistory.CompareAsync(existingPath, temporaryPath!, cancellationToken);
+                if (relationship is HistoryRelationship.Equal or HistoryRelationship.ExistingExtendsIncoming)
+                    return existingPath;
+                if (relationship == HistoryRelationship.Diverged)
+                {
+                    string conflict = await SessionHistory.PreserveConflictAsync(metadata.Id, existingPath, temporaryPath!,
+                        conflictDirectory ?? Path.Combine(Path.GetDirectoryName(root)!, "sync-conflicts"), cancellationToken);
+                    throw new IOException($"Session {metadata.Id:D} diverged. Both versions were preserved in {conflict}.");
+                }
+                if (fingerprint != await SessionHistory.FingerprintAsync(existingPath, cancellationToken))
+                    throw new IOException("The local session changed during import. Retry after it stops changing.");
+                guard.Dispose();
+                File.Move(temporaryPath!, existingPath, overwrite: true);
+                return existingPath;
+            }
             File.Move(temporaryPath!, destination!, overwrite: false);
             return destination!;
         }

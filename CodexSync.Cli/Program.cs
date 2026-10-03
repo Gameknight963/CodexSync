@@ -18,7 +18,12 @@ try
               codexsync map <session-id> <local-folder>
               codexsync mapping-path
               codexsync import <session-file>
-              codexsync export <session-id> <archive-folder>
+              codexsync export <session-id> [archive-folder]
+              codexsync archive <folder>
+              codexsync archive-path
+              codexsync sync
+
+            sync pulls, syncs all mapped sessions, commits, and pushes the configured archive.
 
             Options:
               --mapping-file <path>  Override the machine-local mapping file.
@@ -33,16 +38,30 @@ try
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "CodexSync", "mappings.json"));
     SessionMappingStore store = new(mappingPath);
+    ArchiveConfiguration archiveConfiguration = new(Path.Combine(Path.GetDirectoryName(mappingPath)!, "archive.json"));
     if (fullPaths && arguments[0] != "list")
         throw new ArgumentException("--full-paths is only supported by list.");
 
     switch (arguments[0])
     {
-        case "export" when arguments.Count == 3:
+        case "archive" when arguments.Count == 2:
+            await archiveConfiguration.SetAsync(arguments[1]);
+            Console.WriteLine(await archiveConfiguration.GetAsync());
+            return 0;
+        case "archive-path" when arguments.Count == 1:
+            Console.WriteLine(await archiveConfiguration.GetAsync());
+            return 0;
+        case "sync" when arguments.Count == 1:
+            if (sessionsOverride is not null)
+                throw new ArgumentException("Use --codex-home for sync.");
+            return await SyncCommand.RunAsync(await archiveConfiguration.GetAsync(), codexHome, store,
+                Path.Combine(Path.GetDirectoryName(mappingPath)!, "conflicts"));
+        case "export" when arguments.Count is 2 or 3:
             if (!Guid.TryParse(arguments[1], out Guid exportId) || exportId == Guid.Empty)
                 throw new ArgumentException("The session ID must be a non-empty UUID.");
             string exportedPath = await SessionExporter.ExportAsync(exportId,
-                sessionsOverride ?? Path.Combine(codexHome, "sessions"), arguments[2]);
+                sessionsOverride ?? Path.Combine(codexHome, "sessions"),
+                arguments.Count == 3 ? arguments[2] : await archiveConfiguration.GetAsync());
             Console.WriteLine($"Exported: {exportedPath}");
             return 0;
         case "import" when arguments.Count == 2:
@@ -50,7 +69,8 @@ try
                 throw new ArgumentException("Use --codex-home for import; --sessions-dir only applies to list or export.");
             SessionMetadata importedMetadata = await SessionReader.ReadMetadataAsync(arguments[1]);
             string importedPath = await SessionImporter.ImportAsync(arguments[1],
-                Path.Combine(codexHome, "sessions"), store);
+                Path.Combine(codexHome, "sessions"), store,
+                conflictDirectory: Path.Combine(Path.GetDirectoryName(mappingPath)!, "conflicts"));
             Console.WriteLine($"Imported: {importedPath}");
             try
             {
@@ -117,7 +137,8 @@ try
             throw new ArgumentException("Unknown command or incorrect arguments. Use --help for usage.");
     }
 }
-catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
+catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or
+    Newtonsoft.Json.JsonException or System.ComponentModel.Win32Exception)
 {
     Console.Error.WriteLine($"Error: {exception.Message}");
     return 1;
