@@ -1,0 +1,84 @@
+using System.Globalization;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+
+namespace CodexSync.Core;
+
+public static class SessionImporter
+{
+    // Import only new sessions. Updating an existing history requires conflict handling.
+    public static async Task<string> ImportAsync(string sourcePath, string sessionsDirectory,
+        SessionMappingStore mappings, CancellationToken cancellationToken = default)
+    {
+        SessionMetadata metadata = await SessionReader.ReadMetadataAsync(sourcePath, cancellationToken);
+        string localFolder = await mappings.GetAsync(metadata.Id, cancellationToken) ??
+            throw new InvalidDataException($"Session {metadata.Id:D} has no local folder mapping. Use map first.");
+        if (!Directory.Exists(localFolder))
+            throw new DirectoryNotFoundException($"The mapped folder does not exist: {localFolder}");
+
+        string root = Path.GetFullPath(sessionsDirectory);
+        if (Directory.Exists(root))
+        {
+            foreach (string existing in Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories))
+            {
+                SessionMetadata other = await SessionReader.ReadMetadataAsync(existing, cancellationToken);
+                if (other.Id == metadata.Id)
+                    throw new IOException($"Session {metadata.Id:D} already exists at {existing}. Import will not overwrite it.");
+            }
+        }
+
+        using FileStream source = new(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using StreamReader reader = new(source);
+        string? temporaryPath = null;
+        string? destination = null;
+        StreamWriter? writer = null;
+        try
+        {
+            bool first = true;
+            await foreach (JObject record in SessionReader.ReadRecordsAsync(reader, cancellationToken))
+            {
+                if (first)
+                {
+                    // Revalidate the snapshot opened for the actual copy.
+                    using StringReader metadataReader = new(record.ToString(Formatting.None));
+                    SessionMetadata snapshot = await SessionReader.ReadMetadataAsync(metadataReader, cancellationToken);
+                    if (snapshot.Id != metadata.Id || snapshot.WorkingDirectory != metadata.WorkingDirectory)
+                        throw new IOException("The source metadata changed during import.");
+                    string? timestamp = snapshot.Payload.Value<string>("timestamp") ?? record.Value<string>("timestamp");
+                    if (!DateTimeOffset.TryParse(timestamp, CultureInfo.InvariantCulture,
+                        DateTimeStyles.AssumeUniversal, out DateTimeOffset created))
+                        throw new InvalidDataException("Session metadata requires a valid timestamp for import.");
+                    string directory = Path.Combine(root, created.ToString("yyyy", CultureInfo.InvariantCulture),
+                        created.ToString("MM", CultureInfo.InvariantCulture), created.ToString("dd", CultureInfo.InvariantCulture));
+                    Directory.CreateDirectory(directory);
+                    destination = Path.Combine(directory,
+                        $"rollout-{created.ToString("yyyy-MM-ddTHH-mm-ss", CultureInfo.InvariantCulture)}-{metadata.Id:D}.jsonl");
+                    temporaryPath = Path.Combine(directory, $".{Guid.NewGuid():N}.tmp");
+                    writer = new StreamWriter(new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None));
+                    first = false;
+                }
+
+                // Only structural working-directory fields change. Messages and tool history stay historical.
+                string? type = record.Value<string>("type");
+                if (type is "session_meta" or "turn_context" && record["payload"] is JObject payload)
+                    payload["cwd"] = localFolder;
+                if (type == "world_state" &&
+                    record["payload"]?["state"]?["environments"]?["environments"]?["local"] is JObject local &&
+                    local["cwd"] is not null)
+                    local["cwd"] = localFolder;
+                await writer!.WriteLineAsync(record.ToString(Formatting.None).AsMemory(), cancellationToken);
+            }
+            if (writer is null) throw new InvalidDataException("The session file is empty.");
+            await writer.DisposeAsync();
+            writer = null;
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temporaryPath!, destination!, overwrite: false);
+            return destination!;
+        }
+        finally
+        {
+            if (writer is not null) await writer.DisposeAsync();
+            if (temporaryPath is not null && File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+    }
+}

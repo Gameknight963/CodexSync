@@ -1,10 +1,14 @@
 using CodexSync.Core;
+using CodexSync.Cli;
 
 try
 {
     List<string> arguments = new(args);
     string? mappingOverride = TakeOption(arguments, "--mapping-file");
     string? sessionsOverride = TakeOption(arguments, "--sessions-dir");
+    string codexHome = Path.GetFullPath(TakeOption(arguments, "--codex-home") ??
+        Environment.GetEnvironmentVariable("CODEX_HOME") ??
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex"));
     bool fullPaths = arguments.Remove("--full-paths");
     if (arguments.Count == 0 || arguments[0] is "--help" or "-h" or "help")
     {
@@ -13,10 +17,12 @@ try
               codexsync list [--full-paths]
               codexsync map <session-id> <local-folder>
               codexsync mapping-path
+              codexsync import <session-file>
 
             Options:
               --mapping-file <path>  Override the machine-local mapping file.
               --sessions-dir <path>  Override the directory scanned by list.
+              --codex-home <path>    Override the Codex home for list or import.
               --full-paths           Show complete paths in list instead of shortening them.
             """);
         return 0;
@@ -31,6 +37,25 @@ try
 
     switch (arguments[0])
     {
+        case "import" when arguments.Count == 2:
+            if (sessionsOverride is not null)
+                throw new ArgumentException("Use --codex-home for import; --sessions-dir only applies to list.");
+            SessionMetadata importedMetadata = await SessionReader.ReadMetadataAsync(arguments[1]);
+            string importedPath = await SessionImporter.ImportAsync(arguments[1],
+                Path.Combine(codexHome, "sessions"), store);
+            Console.WriteLine($"Imported: {importedPath}");
+            try
+            {
+                await CodexRegistration.RegisterAsync(importedMetadata.Id,
+                    (await store.GetAsync(importedMetadata.Id))!, codexHome);
+            }
+            catch (Exception exception) when (exception is IOException or System.ComponentModel.Win32Exception or Newtonsoft.Json.JsonException)
+            {
+                throw new IOException($"The file was imported, but Codex registration failed: {exception.Message} " +
+                    $"Retry using codex resume {importedMetadata.Id:D} -C \"{await store.GetAsync(importedMetadata.Id)}\" with CODEX_HOME set to \"{codexHome}\".", exception);
+            }
+            Console.WriteLine("Registered with Codex in the mapped folder.");
+            return 0;
         case "mapping-path" when arguments.Count == 1:
             Console.WriteLine(mappingPath);
             return 0;
@@ -44,8 +69,6 @@ try
             Console.WriteLine($"{id:D} -> {folder}");
             return 0;
         case "list" when arguments.Count == 1:
-            string codexHome = Environment.GetEnvironmentVariable("CODEX_HOME") ??
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
             string sessionsPath = Path.GetFullPath(sessionsOverride ?? Path.Combine(codexHome, "sessions"));
             if (!Directory.Exists(sessionsPath))
                 throw new DirectoryNotFoundException($"The sessions directory does not exist: {sessionsPath}");
