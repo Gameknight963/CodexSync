@@ -15,3 +15,6 @@ concurrency:
 jobs:
   build-and-test:
     uses: ./.github/workflows/build.yml
+
+  test-installation:
+    uses: ./.github/workflows/install-test.yml

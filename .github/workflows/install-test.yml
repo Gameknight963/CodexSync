@@ -1,0 +1,42 @@
+name: Test real release installation
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release tag to install (blank selects newest release, including prereleases).
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Install (${{ matrix.os }}, self-contained=${{ matrix.self-contained }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        self-contained: [false, true]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install from GitHub and verify files and PATH
+        shell: pwsh
+        env:
+          INSTALL_VERSION: ${{ inputs.version }}
+          INSTALL_SELF_CONTAINED: ${{ matrix.self-contained }}
+        run: |
+          $options = @{ SelfContained = ($env:INSTALL_SELF_CONTAINED -eq 'true') }
+          if ($env:INSTALL_VERSION) { $options.Version = $env:INSTALL_VERSION }
+          & .github/scripts/test-live-install.ps1 @options
