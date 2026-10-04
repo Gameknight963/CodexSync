@@ -2,7 +2,7 @@
 set -eux
 
 for self_contained in false true; do
-    destination="./pkg"
+    destination="./pkg"    
     if [ "$self_contained" = true ]; then
         destination="$destination/self-contained"
     fi
@@ -25,3 +25,5 @@ for self_contained in false true; do
         mv -f "$publish_directory/$executable" "$destination/$executable"
     done
 done
+
+cp -f "./.agents/skills/codexsync-setup/SKILL.md" "./pkg/SKILL.md"
