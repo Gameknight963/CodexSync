@@ -2,10 +2,7 @@
 set -eux
 
 for self_contained in false true; do
-    destination="./pkg"    
-    if [ "$self_contained" = true ]; then
-        destination="$destination/self-contained"
-    fi
+    destination="./pkg"
     mkdir -p "$destination"
 
     for runtime in linux-x64 win-x64; do
@@ -19,10 +16,15 @@ for self_contained in false true; do
             -o "$publish_directory"
 
         executable="codexsync"
+        packaged_executable="$executable"
+        if [ "$self_contained" = true ]; then
+            packaged_executable="$packaged_executable-selfcontained"
+        fi
         if [ "$runtime" = win-x64 ]; then
             executable="$executable.exe"
+            packaged_executable="$packaged_executable.exe"
         fi
-        mv -f "$publish_directory/$executable" "$destination/$executable"
+        mv -f "$publish_directory/$executable" "$destination/$packaged_executable"
     done
 done
 
