@@ -8,13 +8,14 @@ public static class SessionImporter
 {
     public static async Task<string> ImportAsync(string sourcePath, string sessionsDirectory,
         SessionMappingStore mappings, CancellationToken cancellationToken = default,
-        string? conflictDirectory = null)
+        string? conflictDirectory = null, string? localFolderOverride = null)
     {
         SessionMetadata metadata = await SessionReader.ReadMetadataAsync(sourcePath, cancellationToken);
-        string localFolder = await mappings.GetAsync(metadata.Id, cancellationToken) ??
+        string localFolder = localFolderOverride ?? await mappings.GetAsync(metadata.Id, cancellationToken) ??
             throw new InvalidDataException($"Session {metadata.Id:D} has no local folder mapping. Use map first.");
         if (!Directory.Exists(localFolder))
             throw new DirectoryNotFoundException($"The mapped folder does not exist: {localFolder}");
+        if (!Path.IsPathFullyQualified(localFolder)) throw new ArgumentException("A local folder must be absolute.");
 
         string root = Path.GetFullPath(sessionsDirectory);
         string? existingPath = null;

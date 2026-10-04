@@ -6,6 +6,8 @@ try
     List<string> arguments = new(args);
     string? mappingOverride = TakeOption(arguments, "--mapping-file");
     string? sessionsOverride = TakeOption(arguments, "--sessions-dir");
+    string? projectOption = TakeOption(arguments, "--project");
+    string? subfolderOption = TakeOption(arguments, "--subfolder");
     string codexHome = Path.GetFullPath(TakeOption(arguments, "--codex-home") ??
         Environment.GetEnvironmentVariable("CODEX_HOME") ??
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex"));
@@ -16,6 +18,10 @@ try
             Usage:
               codexsync list [--full-paths]
               codexsync map <session-id> <local-folder>
+              codexsync project add <name> <local-folder>
+              codexsync projects
+              codexsync include <session-id> [--project <name>] [--subfolder <relative-folder>]
+              codexsync exclude <session-id>
               codexsync mapping-path
               codexsync import <session-file>
               codexsync export <session-id> [archive-folder]
@@ -23,13 +29,15 @@ try
               codexsync archive-path
               codexsync sync
 
-            sync pulls, syncs all mapped sessions, commits, and pushes the configured archive.
+            map sets a folder override; it does not include a new chat in sync.
+            Setup changes stay private until sync publishes them.
+            sync pulls, syncs explicitly included sessions, commits, and pushes the archive.
 
             Options:
               --mapping-file <path>  Override the machine-local mapping file.
               --sessions-dir <path>  Override the directory scanned by list or export.
-              --codex-home <path>    Override the Codex home for list, import, or export.
-              --full-paths           Show complete paths in list instead of shortening them.
+              --codex-home <path>    Override the Codex home for list, import, export, or sync.
+              --full-paths           Show complete paths in list or projects.
             """);
         return 0;
     }
@@ -39,11 +47,47 @@ try
         "CodexSync", "mappings.json"));
     SessionMappingStore store = new(mappingPath);
     ArchiveConfiguration archiveConfiguration = new(Path.Combine(Path.GetDirectoryName(mappingPath)!, "archive.json"));
-    if (fullPaths && arguments[0] != "list")
-        throw new ArgumentException("--full-paths is only supported by list.");
+    ProjectStore projects = new(Path.Combine(Path.GetDirectoryName(mappingPath)!, "machine.json"),
+        await archiveConfiguration.GetOptionalAsync(), store);
+    if (fullPaths && arguments[0] is not ("list" or "projects"))
+        throw new ArgumentException("--full-paths is only supported by list or projects.");
+    if ((projectOption is not null || subfolderOption is not null) && arguments[0] != "include")
+        throw new ArgumentException("--project and --subfolder only apply to include.");
 
     switch (arguments[0])
     {
+        case "project" when arguments.Count == 4 && arguments[1] == "add":
+            await archiveConfiguration.GetAsync();
+            (string projectFolder, string remote) = await GitProject.DescribeAsync(arguments[3]);
+            await projects.AddProjectAsync(arguments[2], projectFolder, remote);
+            Console.WriteLine($"Project '{arguments[2]}' -> {projectFolder}. No chats were included.");
+            return 0;
+        case "projects" when arguments.Count == 1:
+            ProjectCatalog projectCatalog = await projects.GetAsync();
+            int nameWidth = Math.Max("Project".Length, projectCatalog.Projects.Select(project => project.Name.Length).DefaultIfEmpty(0).Max());
+            Console.WriteLine($"{"Project".PadRight(nameWidth)}  Local folder / repository");
+            foreach (SyncProject project in projectCatalog.Projects.OrderBy(project => project.Name))
+            {
+                Console.Write(project.Name.PadRight(nameWidth) + "  ");
+                WriteColored(FormatPath(project.LocalFolder ?? "(unmapped)", fullPaths),
+                    project.LocalFolder is null ? ConsoleColor.Yellow : ConsoleColor.Green);
+                Console.WriteLine($"  {project.Repository}");
+            }
+            return 0;
+        case "include" when arguments.Count == 2:
+            await archiveConfiguration.GetAsync();
+            if (!Guid.TryParse(arguments[1], out Guid includedId) || includedId == Guid.Empty)
+                throw new ArgumentException("The session ID must be a non-empty UUID.");
+            await projects.IncludeAsync(includedId, projectOption, subfolderOption ?? ".");
+            Console.WriteLine($"Included: {includedId:D}. Selection will be shared on your next sync.");
+            return 0;
+        case "exclude" when arguments.Count == 2:
+            await archiveConfiguration.GetAsync();
+            if (!Guid.TryParse(arguments[1], out Guid excludedId) || excludedId == Guid.Empty)
+                throw new ArgumentException("The session ID must be a non-empty UUID.");
+            await projects.ExcludeAsync(excludedId);
+            Console.WriteLine($"Excluded: {excludedId:D}. Existing logs are retained; selection will be shared on your next sync.");
+            return 0;
         case "archive" when arguments.Count == 2:
             await archiveConfiguration.SetAsync(arguments[1]);
             Console.WriteLine(await archiveConfiguration.GetAsync());
@@ -55,7 +99,7 @@ try
             if (sessionsOverride is not null)
                 throw new ArgumentException("Use --codex-home for sync.");
             return await SyncCommand.RunAsync(await archiveConfiguration.GetAsync(), codexHome, store,
-                Path.Combine(Path.GetDirectoryName(mappingPath)!, "conflicts"));
+                Path.Combine(Path.GetDirectoryName(mappingPath)!, "conflicts"), projects);
         case "export" when arguments.Count is 2 or 3:
             if (!Guid.TryParse(arguments[1], out Guid exportId) || exportId == Guid.Empty)
                 throw new ArgumentException("The session ID must be a non-empty UUID.");
@@ -68,19 +112,21 @@ try
             if (sessionsOverride is not null)
                 throw new ArgumentException("Use --codex-home for import; --sessions-dir only applies to list or export.");
             SessionMetadata importedMetadata = await SessionReader.ReadMetadataAsync(arguments[1]);
+            string importFolder = await projects.ResolveFolderAsync(importedMetadata.Id) ??
+                throw new InvalidDataException("No folder mapping for this session or its project.");
             string importedPath = await SessionImporter.ImportAsync(arguments[1],
                 Path.Combine(codexHome, "sessions"), store,
-                conflictDirectory: Path.Combine(Path.GetDirectoryName(mappingPath)!, "conflicts"));
+                conflictDirectory: Path.Combine(Path.GetDirectoryName(mappingPath)!, "conflicts"), localFolderOverride: importFolder);
             Console.WriteLine($"Imported: {importedPath}");
             try
             {
                 await CodexRegistration.RegisterAsync(importedMetadata.Id,
-                    (await store.GetAsync(importedMetadata.Id))!, codexHome);
+                    importFolder, codexHome);
             }
             catch (Exception exception) when (exception is IOException or System.ComponentModel.Win32Exception or Newtonsoft.Json.JsonException)
             {
                 throw new IOException($"The file was imported, but Codex registration failed: {exception.Message} " +
-                    $"Retry using codex resume {importedMetadata.Id:D} -C \"{await store.GetAsync(importedMetadata.Id)}\" with CODEX_HOME set to \"{codexHome}\".", exception);
+                    $"Retry using codex resume {importedMetadata.Id:D} -C \"{importFolder}\" with CODEX_HOME set to \"{codexHome}\".", exception);
             }
             Console.WriteLine("Registered with Codex in the mapped folder.");
             return 0;
@@ -93,6 +139,7 @@ try
             string folder = Path.GetFullPath(arguments[2]);
             if (!Directory.Exists(folder))
                 throw new ArgumentException($"The local folder does not exist: {folder}");
+            await projects.InitializeAsync();
             await store.SetAsync(id, folder);
             Console.WriteLine($"{id:D} -> {folder}");
             return 0;
@@ -101,7 +148,8 @@ try
             if (!Directory.Exists(sessionsPath))
                 throw new DirectoryNotFoundException($"The sessions directory does not exist: {sessionsPath}");
 
-            List<(string Id, string SavedFolder, string? LocalFolder)> rows = new();
+            ProjectCatalog sessionCatalog = await projects.GetAsync();
+            List<(string Id, string Selected, string SavedFolder, string? LocalFolder)> rows = new();
             int failures = 0;
             foreach (string file in Directory.EnumerateFiles(sessionsPath, "*.jsonl", SearchOption.AllDirectories)
                 .OrderBy(path => path, StringComparer.Ordinal))
@@ -117,16 +165,19 @@ try
                     failures++;
                     continue;
                 }
-                string? localFolder = await store.GetAsync(metadata.Id);
-                rows.Add((metadata.Id.ToString("D"), FormatPath(metadata.WorkingDirectory, fullPaths),
+                string? localFolder = await projects.ResolveFolderAsync(metadata.Id);
+                string selectedStatus = sessionCatalog.Sessions.Any(session => session.Id == metadata.Id && session.Included) ? "included" : "excluded";
+                rows.Add((metadata.Id.ToString("D"), selectedStatus, FormatPath(metadata.WorkingDirectory, fullPaths),
                     localFolder is null ? null : FormatPath(localFolder, fullPaths)));
             }
             int idWidth = Math.Max("Session ID".Length, rows.Select(row => row.Id.Length).DefaultIfEmpty(0).Max());
             int savedWidth = Math.Max("Saved folder".Length, rows.Select(row => row.SavedFolder.Length).DefaultIfEmpty(0).Max());
-            Console.WriteLine($"{"Session ID".PadRight(idWidth)}  {"Saved folder".PadRight(savedWidth)}  Local folder");
-            foreach ((string idText, string savedFolder, string? localFolder) in rows)
+            Console.WriteLine($"{"Session ID".PadRight(idWidth)}  Selection  {"Saved folder".PadRight(savedWidth)}  Local folder");
+            foreach ((string idText, string selectedStatus, string savedFolder, string? localFolder) in rows)
             {
                 Console.Write(idText.PadRight(idWidth) + "  ");
+                WriteColored(selectedStatus.PadRight(9), selectedStatus == "included" ? ConsoleColor.Green : ConsoleColor.DarkGray);
+                Console.Write("  ");
                 WriteColored(savedFolder.PadRight(savedWidth), ConsoleColor.DarkGray);
                 Console.Write("  ");
                 WriteColored(localFolder ?? "(unmapped)", localFolder is null ? ConsoleColor.Yellow : ConsoleColor.Green);

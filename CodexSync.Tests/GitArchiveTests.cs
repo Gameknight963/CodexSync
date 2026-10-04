@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using CodexSync.Cli;
+using CodexSync.Core;
 
 namespace CodexSync.Tests;
 
@@ -40,6 +41,35 @@ public sealed class GitArchiveTests : IDisposable
         string before = await GitAsync(b, "rev-parse", "HEAD");
         await second.PushAsync();
         Assert.Equal(before, await GitAsync(b, "rev-parse", "HEAD"));
+        Assert.Equal("", (await GitAsync(b, "status", "--porcelain")).Trim());
+    }
+
+    [Fact]
+    public async Task ProjectSelectionTravelsThroughGitWithoutSharingCheckoutPaths()
+    {
+        (string a, string b) = await SetupAsync();
+        string checkoutA = Path.Combine(root, "checkout-a");
+        string checkoutB = Path.Combine(root, "checkout-b");
+        Directory.CreateDirectory(checkoutA);
+        Directory.CreateDirectory(checkoutB);
+        ProjectStore first = new(Path.Combine(root, "machine-a.json"), a,
+            new SessionMappingStore(Path.Combine(root, "mappings-a.json")));
+        ProjectStore second = new(Path.Combine(root, "machine-b.json"), b,
+            new SessionMappingStore(Path.Combine(root, "mappings-b.json")));
+        Guid chat = Guid.NewGuid();
+        await first.AddProjectAsync("app", checkoutA, "git@github.com:example/app.git");
+        await first.IncludeAsync(chat, "app");
+        Assert.Equal("", (await GitAsync(a, "status", "--porcelain")).Trim());
+        await new GitArchive(a).PullAsync();
+        PendingChanges published = await first.PublishPendingAsync();
+        await new GitArchive(a).PushAsync();
+        await first.AcknowledgeAsync(published);
+        await new GitArchive(b).PullAsync();
+        Assert.True(Assert.Single((await second.GetAsync()).Sessions).Included);
+        Assert.Null(await second.ResolveFolderAsync(chat));
+        await second.AddProjectAsync("app", checkoutB, "https://github.com/example/app");
+        Assert.Equal(checkoutB, await second.ResolveFolderAsync(chat));
+        Assert.DoesNotContain(checkoutA, await File.ReadAllTextAsync(Path.Combine(b, ProjectStore.ManifestName)));
         Assert.Equal("", (await GitAsync(b, "status", "--porcelain")).Trim());
     }
 

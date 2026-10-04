@@ -4,6 +4,8 @@ namespace CodexSync.Cli;
 
 internal sealed class ArchiveConfiguration(string path)
 {
+    public async Task<string?> GetOptionalAsync() => File.Exists(path) ? await GetAsync() : null;
+
     public async Task<string> GetAsync()
     {
         if (!File.Exists(path)) throw new IOException("No archive configured. Use archive <folder> first.");

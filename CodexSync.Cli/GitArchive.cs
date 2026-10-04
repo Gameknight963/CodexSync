@@ -19,6 +19,8 @@ internal sealed class GitArchive(string directory)
     public async Task PushAsync()
     {
         List<string> paths = new();
+        if (File.Exists(Path.Combine(directory, CodexSync.Core.ProjectStore.ManifestName)))
+            paths.Add(CodexSync.Core.ProjectStore.ManifestName);
         if (Directory.Exists(Path.Combine(directory, "sessions"))) paths.Add("sessions");
         if (Directory.Exists(Path.Combine(directory, "conflicts"))) paths.Add("conflicts");
         if (paths.Count > 0)

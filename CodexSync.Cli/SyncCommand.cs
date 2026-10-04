@@ -5,7 +5,7 @@ namespace CodexSync.Cli;
 internal static class SyncCommand
 {
     public static async Task<int> RunAsync(string archive, string codexHome, SessionMappingStore mappings,
-        string conflictDirectory)
+        string conflictDirectory, ProjectStore projects)
     {
         string relative = Path.GetRelativePath(Path.GetFullPath(archive), Path.GetFullPath(codexHome));
         string reverse = Path.GetRelativePath(Path.GetFullPath(codexHome), Path.GetFullPath(archive));
@@ -21,20 +21,25 @@ internal static class SyncCommand
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(lockKey))) + ".lock");
         using FileStream syncLock = new(lockFile, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         GitArchive git = new(archive);
-        IReadOnlyDictionary<Guid, string> selected = await mappings.GetAllAsync();
-        if (selected.Count == 0) throw new IOException("No sessions selected. Map a session to include it in sync.");
         await git.PullAsync();
+        PendingChanges pending = await projects.PublishPendingAsync();
+        ProjectCatalog catalog = await projects.GetAsync();
+        SelectedSession[] selected = catalog.Sessions.Where(session => session.Included).OrderBy(session => session.Id).ToArray();
         string sessions = Path.Combine(codexHome, "sessions");
         int failures = 0;
-        foreach ((Guid id, string folder) in selected.OrderBy(entry => entry.Key))
+        foreach (SelectedSession selection in selected)
         {
+            Guid id = selection.Id;
             try
             {
+                string folder = await projects.ResolveFolderAsync(id) ??
+                    throw new InvalidDataException("No local folder for this session. Bind its project using project add, or set a session override using map.");
+                if (!Directory.Exists(folder)) throw new DirectoryNotFoundException($"The local folder does not exist: {folder}");
                 string shared = Path.Combine(archive, "sessions", $"{id:D}.jsonl");
                 try { await SessionExporter.ExportAsync(id, sessions, archive); }
                 catch (FileNotFoundException) when (File.Exists(shared)) { }
                 catch (DirectoryNotFoundException) when (File.Exists(shared)) { }
-                await SessionImporter.ImportAsync(shared, sessions, mappings, conflictDirectory: conflictDirectory);
+                await SessionImporter.ImportAsync(shared, sessions, mappings, conflictDirectory: conflictDirectory, localFolderOverride: folder);
                 await CodexRegistration.RegisterAsync(id, folder, codexHome);
                 Console.WriteLine($"Synced: {id:D}");
             }
@@ -45,7 +50,9 @@ internal static class SyncCommand
                 failures++;
             }
         }
+        if (selected.Length == 0) Console.WriteLine("No chats included. Project and selection changes will still be published.");
         await git.PushAsync();
+        await projects.AcknowledgeAsync(pending);
         return failures == 0 ? 0 : 1;
     }
 }
