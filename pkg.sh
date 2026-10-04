@@ -1,25 +1,27 @@
-set -x
+#!/usr/bin/env bash
+set -eux
 
-dotnet publish ./CodexSync.Cli/CodexSync.Cli.csproj \
-    -r win-x64 \
-    -p:PublishSingleFile=true \
-    --self-contained=false
+for self_contained in false true; do
+    destination="./pkg"
+    if [ "$self_contained" = true ]; then
+        destination="$destination/self-contained"
+    fi
+    mkdir -p "$destination"
 
-dotnet publish ./CodexSync.Cli/CodexSync.Cli.csproj \
-    -r linux-x64 \
-    -p:PublishSingleFile=true \
-    --self-contained=false
+    for runtime in linux-x64 win-x64; do
+        publish_directory="./CodexSync.Cli/bin/Release/net10.0/$runtime/publish-$self_contained"
+        dotnet publish ./CodexSync.Cli/CodexSync.Cli.csproj \
+            -c Release \
+            -r "$runtime" \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            --self-contained="$self_contained" \
+            -o "$publish_directory"
 
-destination="./x64"
-
-mkdir -p "$destination"
-
-# linux before windows otherwise it fucks up if you're on windows
-
-mv -f \
-    "./CodexSync.Cli/bin/Release/net10.0/linux-x64/publish/codexsync" \
-    "$destination/codexsync"
-
-mv -f \
-    "./CodexSync.Cli/bin/Release/net10.0/win-x64/publish/codexsync.exe" \
-    "$destination/codexsync.exe"
+        executable="codexsync"
+        if [ "$runtime" = win-x64 ]; then
+            executable="$executable.exe"
+        fi
+        mv -f "$publish_directory/$executable" "$destination/$executable"
+    done
+done
