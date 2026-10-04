@@ -1,0 +1,51 @@
+name: Release assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.id }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-test:
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ github.event.release.tag_name }}
+
+  upload:
+    name: Upload release assets
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: codexsync-*
+          path: assets
+          merge-multiple: true
+
+      - name: Verify and upload assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          expected=(
+            assets/codexsync
+            assets/codexsync.exe
+            assets/codexsync-selfcontained
+            assets/codexsync-selfcontained.exe
+            assets/SKILL.md
+          )
+          for asset in "${expected[@]}"; do
+            test -s "$asset"
+          done
+          gh release upload "$RELEASE_TAG" "${expected[@]}" --clobber
