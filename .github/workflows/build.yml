@@ -66,6 +66,15 @@ jobs:
             Copy-Item .agents/skills/codexsync-setup/SKILL.md artifacts/pkg/SKILL.md
           }
 
+      - name: Test installers
+        run: |
+          if ($IsWindows) {
+            & .github/scripts/test-install.ps1 -Executable artifacts/pkg/codexsync-selfcontained.exe
+          } else {
+            bash .github/scripts/test-install.sh artifacts/pkg/codexsync-selfcontained
+            if ($LASTEXITCODE -ne 0) { throw 'Installer tests failed.' }
+          }
+
       - name: Upload builds
         uses: actions/upload-artifact@v4
         with:
