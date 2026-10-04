@@ -1,5 +1,6 @@
 param(
     [switch] $Prerelease,
+    [switch] $SelfContained,
     [string] $Version,
     [string] $InstallDir = (Join-Path $env:LOCALAPPDATA 'CodexSync/bin'),
     [string] $SkillDir = (Join-Path $env:USERPROFILE '.agents/skills/codexsync-setup'),
@@ -36,7 +37,8 @@ try {
         }
     }
     if ($release.draft) { throw 'A draft release cannot be installed.' }
-    $binary = @($release.assets | Where-Object name -EQ 'codexsync-selfcontained.exe')
+    $binaryName = if ($SelfContained) { 'codexsync-selfcontained.exe' } else { 'codexsync.exe' }
+    $binary = @($release.assets | Where-Object name -EQ $binaryName)
     $skill = @($release.assets | Where-Object name -EQ 'SKILL.md')
     if ($binary.Count -ne 1 -or $skill.Count -ne 1) {
         throw "Release $($release.tag_name) is missing required assets. It may still be building; try again after the Release assets workflow finishes."
@@ -47,7 +49,7 @@ try {
     try {
         $binaryDownload = Join-Path $temporary 'codexsync.exe'
         $skillDownload = Join-Path $temporary 'SKILL.md'
-        Write-Host "Downloading CodexSync $($release.tag_name)..."
+        Write-Host "Downloading CodexSync $($release.tag_name) ($binaryName)..."
         Invoke-WebRequest $binary[0].browser_download_url -Headers $headers -OutFile $binaryDownload -UseBasicParsing
         Invoke-WebRequest $skill[0].browser_download_url -Headers $headers -OutFile $skillDownload -UseBasicParsing
         if ((Get-Item $binaryDownload).Length -eq 0 -or (Get-Item $skillDownload).Length -eq 0) {
@@ -55,7 +57,10 @@ try {
         }
         # Check the download before replacing an existing installation.
         & $binaryDownload --help | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'The downloaded executable failed its startup check.' }
+        if ($LASTEXITCODE -ne 0) {
+            if (!$SelfContained) { throw 'Startup check failed. Install the .NET 10 runtime or rerun with -SelfContained.' }
+            throw 'The downloaded executable failed its startup check.'
+        }
 
         New-Item -ItemType Directory -Path $installPath, $skillPath -Force | Out-Null
         Copy-Item -LiteralPath $binaryDownload -Destination (Join-Path $installPath 'codexsync.exe') -Force

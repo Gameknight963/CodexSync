@@ -21,7 +21,8 @@ done
 case "$url" in
     */tags/*) source=release.json ;;
     *releases\?*) source=releases.json ;;
-    https://fixture/binary) source=codexsync ;;
+    https://fixture/binary) source=codexsync; printf 'framework\n' >> "$CODEXSYNC_INSTALLER_FIXTURE/downloads" ;;
+    https://fixture/binary-selfcontained) source=codexsync-selfcontained; printf 'self-contained\n' >> "$CODEXSYNC_INSTALLER_FIXTURE/downloads" ;;
     https://fixture/skill) source=SKILL.md ;;
     *) exit 1 ;;
 esac
@@ -32,9 +33,10 @@ export PATH="$fixture/bin:$PATH"
 
 # Use the actual published Linux executable to check installation and startup.
 cp "$1" "$fixture/network/codexsync"
+cp "$2" "$fixture/network/codexsync-selfcontained"
 cp .agents/skills/codexsync-setup/SKILL.md "$fixture/network/SKILL.md"
 cat > "$fixture/network/release.json" <<'JSON'
-{"tag_name":"v-test","draft":false,"prerelease":true,"assets":[{"name":"codexsync-selfcontained","browser_download_url":"https://fixture/binary"},{"name":"SKILL.md","browser_download_url":"https://fixture/skill"}]}
+{"tag_name":"v-test","draft":false,"prerelease":true,"assets":[{"name":"codexsync","browser_download_url":"https://fixture/binary"},{"name":"codexsync-selfcontained","browser_download_url":"https://fixture/binary-selfcontained"},{"name":"SKILL.md","browser_download_url":"https://fixture/skill"}]}
 JSON
 jq -s '.' "$fixture/network/release.json" > "$fixture/network/releases.json"
 arguments=(--no-path --install-dir "$fixture/installed" --skill-dir "$fixture/skill")
@@ -44,9 +46,12 @@ fi
 grep -q 'No matching release' "$fixture/error"
 test ! -d "$fixture/installed"
 bash install.sh "${arguments[@]}" --prerelease
+test "$(tail -n 1 "$fixture/downloads")" = framework
 test -x "$fixture/installed/codexsync"
 cmp "$fixture/skill/SKILL.md" "$fixture/network/SKILL.md"
 printf 'existing configuration\n' > "$fixture/installed/preserve.txt"
+bash install.sh "${arguments[@]}" --prerelease --self-contained
+test "$(tail -n 1 "$fixture/downloads")" = self-contained
 bash install.sh "${arguments[@]}" --version v-test
 test -f "$fixture/installed/preserve.txt"
 jq '.prerelease = false' "$fixture/network/release.json" > "$fixture/network/next.json"

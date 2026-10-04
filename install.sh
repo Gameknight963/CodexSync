@@ -3,6 +3,7 @@ set -euo pipefail
 
 api="https://api.github.com/repos/gameknight963/codexsync/releases"
 prerelease=false
+self_contained=false
 version=""
 install_dir="${HOME}/.local/bin"
 skill_dir="${HOME}/.agents/skills/codexsync-setup"
@@ -10,11 +11,12 @@ configure_path=true
 
 fail() { printf 'CodexSync installation failed: %s\n' "$*" >&2; exit 1; }
 usage() {
-    printf '%s\n' 'Usage: install.sh [--prerelease] [--version TAG] [--install-dir DIR] [--skill-dir DIR] [--no-path]'
+    printf '%s\n' 'Usage: install.sh [--prerelease] [--self-contained] [--version TAG] [--install-dir DIR] [--skill-dir DIR] [--no-path]'
 }
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --prerelease) prerelease=true; shift ;;
+        --self-contained) self_contained=true; shift ;;
         --version|--install-dir|--skill-dir)
             [ "$#" -ge 2 ] && [ -n "$2" ] || fail "$1 requires a value."
             case "$1" in
@@ -62,17 +64,24 @@ else
 fi
 jq -e '.draft == false' "$temporary/release.json" >/dev/null || fail 'A draft release cannot be installed.'
 tag=$(jq -er '.tag_name' "$temporary/release.json")
-binary_url=$(jq -r '[.assets[] | select(.name == "codexsync-selfcontained")][0].browser_download_url // empty' "$temporary/release.json")
+binary_name=codexsync
+if [ "$self_contained" = true ]; then binary_name=codexsync-selfcontained; fi
+binary_url=$(jq -r --arg name "$binary_name" '[.assets[] | select(.name == $name)][0].browser_download_url // empty' "$temporary/release.json")
 skill_url=$(jq -r '[.assets[] | select(.name == "SKILL.md")][0].browser_download_url // empty' "$temporary/release.json")
 [ -n "$binary_url" ] && [ -n "$skill_url" ] || \
     fail "Release $tag is missing required assets. It may still be building; try again after the Release assets workflow finishes."
 
-printf 'Downloading CodexSync %s...\n' "$tag"
+printf 'Downloading CodexSync %s (%s)...\n' "$tag" "$binary_name"
 fetch "$binary_url" -o "$temporary/codexsync"
 fetch "$skill_url" -o "$temporary/SKILL.md"
 [ -s "$temporary/codexsync" ] && [ -s "$temporary/SKILL.md" ] || fail 'A downloaded asset is empty.'
 chmod +x "$temporary/codexsync"
-"$temporary/codexsync" --help >/dev/null || fail 'The downloaded executable failed its startup check.'
+if ! "$temporary/codexsync" --help >/dev/null; then
+    if [ "$self_contained" = false ]; then
+        fail 'Startup check failed. Install the .NET 10 runtime or rerun with --self-contained.'
+    fi
+    fail 'The downloaded executable failed its startup check.'
+fi
 mkdir -p -- "$install_dir" "$skill_dir"
 install -m 755 "$temporary/codexsync" "$install_dir/codexsync"
 install -m 644 "$temporary/SKILL.md" "$skill_dir/SKILL.md"

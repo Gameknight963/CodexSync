@@ -69,9 +69,9 @@ jobs:
       - name: Test installers
         run: |
           if ($IsWindows) {
-            & .github/scripts/test-install.ps1 -Executable artifacts/pkg/codexsync-selfcontained.exe
+            & .github/scripts/test-install.ps1 -Executable artifacts/pkg/codexsync.exe -SelfContainedExecutable artifacts/pkg/codexsync-selfcontained.exe
           } else {
-            bash .github/scripts/test-install.sh artifacts/pkg/codexsync-selfcontained
+            bash .github/scripts/test-install.sh artifacts/pkg/codexsync artifacts/pkg/codexsync-selfcontained
             if ($LASTEXITCODE -ne 0) { throw 'Installer tests failed.' }
           }
 
