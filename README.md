@@ -1,5 +1,9 @@
 <img src=banner.png width=100%>
 
+[![CI](https://github.com/Gameknight963/CodexSync/actions/workflows/ci.yml/badge.svg)](https://github.com/Gameknight963/CodexSync/actions/workflows/ci.yml)
+[![Downloads](https://img.shields.io/github/downloads/gameknight963/CodexSync/total)](https://img.shields.io/github/downloads/gameknight963/CodexSync/total)
+[![GitHub Release](https://img.shields.io/github/v/release/gameknight963/codexsync)](https://img.shields.io/github/v/release/gameknight963/codexsync)
+
 # CodexSync
 
 Easily sync selected Codex conversations between machines using Git, even when your project folders have different paths.
