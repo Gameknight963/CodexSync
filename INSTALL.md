@@ -40,7 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/Gameknight963/CodexSync/master/inst
 curl -fsSL https://raw.githubusercontent.com/Gameknight963/CodexSync/master/install.sh | bash -s -- --self-contained
 ```
 
-Add `--prerelease` to also include prerleases. Use `--version v0.1.0` to select a tag.
+Add `--prerelease` to also include prereleases. Use `--version v0.1.0` to select a tag.
 
 The executable goes in `~/.local/bin`; the skill goes in `~/.agents/skills/codexsync-setup/SKILL.md`. The installer adds PATH configuration to `.profile` and the Bash or Zsh startup files where applicable. Open a new terminal afterward.
 
