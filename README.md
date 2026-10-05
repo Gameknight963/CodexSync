@@ -10,8 +10,6 @@ The CLI is written in C# and supports Windows and Linux x64. A Codex skill handl
 
 > If you need CodexSync for another enviornment or architecture, let me know by opening an issue. If you build it yourself without single file it should work anywhere though.
 
-> banner.blend contains the blender file used to render the above banner
-
 ## Installation
 
 See [INSTALL.md](INSTALL.md) for one-command Windows and Linux installers.
