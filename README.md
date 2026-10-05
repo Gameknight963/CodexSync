@@ -1,3 +1,5 @@
+<img src=banner.png width=100%>
+
 # CodexSync
 
 Easily sync selected Codex conversations between machines using Git, even when your project folders have different paths.
@@ -7,6 +9,8 @@ CodexSync stores session histories and project associations in a Git repository.
 The CLI is written in C# and supports Windows and Linux x64. A Codex skill handles most of the actual mapping, so all you have to do is run the command to sync it.
 
 > If you need CodexSync for another enviornment or architecture, let me know by opening an issue. If you build it yourself without single file it should work anywhere though.
+
+> banner.blend contains the blender file used to render the above banner
 
 ## Installation
 
